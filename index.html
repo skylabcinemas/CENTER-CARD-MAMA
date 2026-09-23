@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Center Card — Online</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#090d14;color:#fff;font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;padding:20px}
+  .app{width:100%;max-width:460px}
+  .card{background:#111827;border:1px solid #273244;border-radius:22px;padding:24px;box-shadow:0 18px 50px rgba(0,0,0,.35)}
+  h1{text-align:center;margin:0 0 6px;font-size:30px;letter-spacing:1px}
+  .sub{text-align:center;color:#9ca3af;margin-bottom:24px}
+  label{display:block;color:#cbd5e1;font-size:14px;margin:14px 0 7px}
+  input,button{width:100%;border-radius:12px;padding:14px;font-size:16px}
+  input{background:#0b1220;color:#fff;border:1px solid #344155;outline:none}
+  input:focus{border-color:#60a5fa}
+  button{border:0;background:#2563eb;color:#fff;font-weight:700;cursor:pointer;margin-top:12px}
+  button.secondary{background:#253044}
+  button.green{background:#059669}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .msg{margin-top:16px;padding:12px;border-radius:12px;display:none;white-space:pre-wrap;word-break:break-word;font-size:14px}
+  .msg.show{display:block}
+  .msg.ok{background:#052e24;color:#a7f3d0;border:1px solid #065f46}
+  .msg.err{background:#3b1111;color:#fecaca;border:1px solid #7f1d1d}
+  .msg.info{background:#172033;color:#bfdbfe;border:1px solid #1e3a5f}
+  .hidden{display:none!important}
+  .status{font-size:13px;color:#9ca3af;margin-top:12px;text-align:center}
+  .room-code{font-size:28px;font-weight:800;letter-spacing:4px;text-align:center;padding:15px;background:#0b1220;border-radius:14px;margin:15px 0}
+  .player{padding:12px;background:#0b1220;border-radius:10px;margin:7px 0}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1}
+  .small{font-size:12px;color:#9ca3af;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div id="authScreen" class="card">
+    <h1>🃏 CENTER CARD</h1>
+    <div class="sub">Online private-room lobby</div>
+
+    <label>Email</label>
+    <input id="email" type="email" autocomplete="email" placeholder="Enter your email">
+
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="Enter your password">
+
+    <button id="signInBtn" onclick="signIn()">Sign in</button>
+    <button id="signUpBtn" class="secondary" onclick="signUp()">Create account</button>
+    <button class="secondary" onclick="testConnection()">Test Supabase connection</button>
+
+    <div id="authMsg" class="msg"></div>
+    <div id="connectionStatus" class="status"></div>
+  </div>
+
+  <div id="homeScreen" class="card hidden">
+    <h1>PRIVATE ROOM</h1>
+    <div class="sub">Create a room or join your friend's room</div>
+
+    <label>Your display name</label>
+    <input id="displayName" placeholder="e.g. Sravan">
+
+    <label>Room code</label>
+    <input id="roomCode" placeholder="e.g. CC2026" autocapitalize="characters">
+
+    <label>Room name</label>
+    <input id="roomName" placeholder="e.g. MY BATCH">
+
+    <label>Starting tokens</label>
+    <input id="startingTokens" type="number" value="500" min="20">
+
+    <button class="green" onclick="createRoom()">Create private room</button>
+    <button class="secondary" onclick="joinRoom()">Join room</button>
+    <button class="secondary" onclick="signOut()">Sign out</button>
+
+    <div id="homeMsg" class="msg"></div>
+  </div>
+
+  <div id="lobbyScreen" class="card hidden">
+    <h1>ROOM LOBBY</h1>
+    <div id="roomTitle" class="sub"></div>
+    <div id="roomCodeDisplay" class="room-code"></div>
+
+    <div class="small">Players in room</div>
+    <div id="players"></div>
+
+    <button class="secondary" onclick="leaveRoom()">Leave room</button>
+    <div id="lobbyMsg" class="msg"></div>
+  </div>
+
+</div>
+
+<script>
+const SUPABASE_URL = "https://fuswxwurwvmwesmnhflh.supabase.co";
+const SUPABASE_KEY = "sb_publishable_hFrZGXnXWEkoM-YK_dPJxw_oSJv9jY2";
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+});
+
+const $ = id => document.getElementById(id);
+
+function showMsg(id, text, type="info"){
+  const el=$(id);
+  el.textContent=text;
+  el.className="msg show "+type;
+}
+function hideMsg(id){ $(id).className="msg"; }
+
+function setBusy(busy){
+  $("signInBtn").disabled=busy;
+  $("signUpBtn").disabled=busy;
+}
+
+function showScreen(name){
+  ["authScreen","homeScreen","lobbyScreen"].forEach(id=>$(id).classList.add("hidden"));
+  $(name).classList.remove("hidden");
+}
+
+async function testConnection(){
+  $("connectionStatus").textContent="Testing connection...";
+  try{
+    const {data, error}=await sb.auth.getSession();
+    if(error) throw error;
+    $("connectionStatus").textContent =
+      "Supabase connection OK" + (data.session ? " • A session is already active." : " • No active login.");
+  }catch(e){
+    $("connectionStatus").textContent="Connection error: "+(e?.message || String(e));
+  }
+}
+
+async function signIn(){
+  const email=$("email").value.trim();
+  const password=$("password").value;
+
+  if(!email || !password){
+    showMsg("authMsg","Please enter both email and password.","err");
+    return;
+  }
+
+  setBusy(true);
+  showMsg("authMsg","Signing in…","info");
+
+  try{
+    const {data,error}=await sb.auth.signInWithPassword({email,password});
+
+    if(error){
+      showMsg("authMsg",
+        "SIGN-IN ERROR\n\n"+(error.message || String(error))+
+        "\n\nIf the account was created earlier, check Supabase → Authentication → Users.",
+        "err");
+      return;
+    }
+
+    if(!data?.session){
+      showMsg("authMsg",
+        "Authentication returned without a session. Check the Supabase email-confirmation setting.",
+        "err");
+      return;
+    }
+
+    showMsg("authMsg","Login successful. Opening Private Room…","ok");
+    await new Promise(r=>setTimeout(r,500));
+    showHome(data.user);
+
+  }catch(e){
+    showMsg("authMsg","JAVASCRIPT ERROR\n\n"+(e?.message || String(e)),"err");
+  }finally{
+    setBusy(false);
+  }
+}
+
+async function signUp(){
+  const email=$("email").value.trim();
+  const password=$("password").value;
+
+  if(!email || !password){
+    showMsg("authMsg","Please enter both email and password.","err");
+    return;
+  }
+  if(password.length < 6){
+    showMsg("authMsg","Password must be at least 6 characters.","err");
+    return;
+  }
+
+  setBusy(true);
+  showMsg("authMsg","Creating account…","info");
+
+  try{
+    const {data,error}=await sb.auth.signUp({email,password});
+
+    if(error){
+      showMsg("authMsg","CREATE-ACCOUNT ERROR\n\n"+(error.message || String(error)),"err");
+      return;
+    }
+
+    if(data?.session){
+      showMsg("authMsg","Account created and logged in. Opening Private Room…","ok");
+      await new Promise(r=>setTimeout(r,500));
+      showHome(data.user);
+    }else{
+      showMsg("authMsg",
+        "Account created, but Supabase returned no session.\n\nIf email confirmation is enabled, confirm the email first, then use Sign in.",
+        "info");
+    }
+  }catch(e){
+    showMsg("authMsg","JAVASCRIPT ERROR\n\n"+(e?.message || String(e)),"err");
+  }finally{
+    setBusy(false);
+  }
+}
+
+async function showHome(user){
+  showScreen("homeScreen");
+  hideMsg("authMsg");
+  $("displayName").value =
+    user?.user_metadata?.display_name ||
+    user?.email?.split("@")[0] || "";
+}
+
+async function signOut(){
+  await sb.auth.signOut();
+  showScreen("authScreen");
+  showMsg("authMsg","Signed out.","info");
+}
+
+async function createRoom(){
+  const displayName=$("displayName").value.trim();
+  const code=$("roomCode").value.trim().toUpperCase();
+  const name=$("roomName").value.trim();
+  const startingTokens=parseInt($("startingTokens").value,10);
+
+  if(!displayName || !code || !name){
+    showMsg("homeMsg","Please fill display name, room code and room name.","err");
+    return;
+  }
+  if(!/^[A-Z0-9]{4,12}$/.test(code)){
+    showMsg("homeMsg","Room code must contain 4–12 letters/numbers only.","err");
+    return;
+  }
+  if(!Number.isFinite(startingTokens) || startingTokens < 20){
+    showMsg("homeMsg","Starting tokens must be at least 20.","err");
+    return;
+  }
+
+  const {data:{user}}=await sb.auth.getUser();
+  if(!user){
+    showMsg("homeMsg","Your login session is missing. Please sign in again.","err");
+    showScreen("authScreen");
+    return;
+  }
+
+  showMsg("homeMsg","Creating room…","info");
+
+  try{
+    const {data:room,error:roomError}=await sb
+      .from("rooms")
+      .insert({
+        code,
+        name,
+        starting_tokens: startingTokens,
+        bank_balance: 0
+      })
+      .select()
+      .single();
+
+    if(roomError){
+      showMsg("homeMsg",
+        "ROOM CREATION ERROR\n\n"+roomError.message+
+        "\n\nIf this mentions RLS/policy or user_id, run the online-lobby migration SQL.",
+        "err");
+      return;
+    }
+
+    const {error:playerError}=await sb.from("players").insert({
+      room_id: room.id,
+      user_id: user.id,
+      display_name: displayName,
+      available_tokens: startingTokens,
+      bank_debt: 0,
+      is_admin: true
+    });
+
+    if(playerError){
+      showMsg("homeMsg",
+        "PLAYER CREATION ERROR\n\n"+playerError.message+
+        "\n\nThe room was created, but the player row failed. Run the online-lobby migration SQL.",
+        "err");
+      return;
+    }
+
+    openLobby(room);
+  }catch(e){
+    showMsg("homeMsg","JAVASCRIPT ERROR\n\n"+(e?.message || String(e)),"err");
+  }
+}
+
+async function joinRoom(){
+  const displayName=$("displayName").value.trim();
+  const code=$("roomCode").value.trim().toUpperCase();
+
+  if(!displayName || !code){
+    showMsg("homeMsg","Enter your display name and room code.","err");
+    return;
+  }
+
+  const {data:{user}}=await sb.auth.getUser();
+  if(!user){
+    showMsg("homeMsg","Your login session is missing. Please sign in again.","err");
+    showScreen("authScreen");
+    return;
+  }
+
+  showMsg("homeMsg","Searching for room…","info");
+
+  try{
+    const {data:room,error:roomError}=await sb
+      .from("rooms")
+      .select("*")
+      .eq("code",code)
+      .maybeSingle();
+
+    if(roomError) throw roomError;
+    if(!room){
+      showMsg("homeMsg","Room not found. Check the room code.","err");
+      return;
+    }
+
+    const {count}=await sb
+      .from("players")
+      .select("*",{count:"exact",head:true})
+      .eq("room_id",room.id);
+
+    if((count ?? 0) >= 6){
+      showMsg("homeMsg","This room already has 6 players.","err");
+      return;
+    }
+
+    const {error:playerError}=await sb.from("players").insert({
+      room_id: room.id,
+      user_id: user.id,
+      display_name: displayName,
+      available_tokens: room.starting_tokens || 500,
+      bank_debt: 0,
+      is_admin: false
+    });
+
+    if(playerError){
+      showMsg("homeMsg","JOIN ERROR\n\n"+playerError.message,"err");
+      return;
+    }
+
+    openLobby(room);
+  }catch(e){
+    showMsg("homeMsg","JAVASCRIPT ERROR\n\n"+(e?.message || String(e)),"err");
+  }
+}
+
+let currentRoom=null;
+let playersChannel=null;
+
+async function openLobby(room){
+  currentRoom=room;
+  showScreen("lobbyScreen");
+  $("roomTitle").textContent=room.name;
+  $("roomCodeDisplay").textContent=room.code;
+  hideMsg("lobbyMsg");
+  await loadPlayers();
+
+  if(playersChannel) await sb.removeChannel(playersChannel);
+  playersChannel=sb.channel("room-"+room.id+"-players")
+    .on("postgres_changes",
+      {event:"*",schema:"public",table:"players",filter:"room_id=eq."+room.id},
+      loadPlayers)
+    .subscribe();
+}
+
+async function loadPlayers(){
+  if(!currentRoom) return;
+
+  const {data,error}=await sb
+    .from("players")
+    .select("display_name,is_admin,available_tokens")
+    .eq("room_id",currentRoom.id)
+    .order("joined_at",{ascending:true});
+
+  if(error){
+    showMsg("lobbyMsg","PLAYER LIST ERROR\n\n"+error.message,"err");
+    return;
+  }
+
+  $("players").innerHTML=(data||[]).map((p,i)=>
+    `<div class="player"><b>${i+1}. ${escapeHtml(p.display_name)}</b>${p.is_admin?" — Bank Admin":""}</div>`
+  ).join("") || '<div class="small">No players yet.</div>';
+}
+
+async function leaveRoom(){
+  if(!currentRoom) return;
+  const {data:{user}}=await sb.auth.getUser();
+  if(user){
+    await sb.from("players").delete()
+      .eq("room_id",currentRoom.id)
+      .eq("user_id",user.id);
+  }
+  if(playersChannel){
+    await sb.removeChannel(playersChannel);
+    playersChannel=null;
+  }
+  currentRoom=null;
+  showScreen("homeScreen");
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g,m=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+  }[m]));
+}
+
+sb.auth.onAuthStateChange((event,session)=>{
+  if(event==="SIGNED_OUT") showScreen("authScreen");
+});
+
+(async function init(){
+  try{
+    const {data:{session}}=await sb.auth.getSession();
+    if(session?.user) showHome(session.user);
+    else showScreen("authScreen");
+  }catch(e){
+    showScreen("authScreen");
+    showMsg("authMsg","Startup error: "+(e?.message || String(e)),"err");
+  }
+})();
+</script>
+</body>
+</html>
